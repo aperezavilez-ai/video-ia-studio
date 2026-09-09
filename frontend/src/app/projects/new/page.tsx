@@ -3,62 +3,58 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Film, ArrowLeft, Sparkles } from "lucide-react"
+import { createProject as apiCreateProject } from "@/lib/api"
 
 export default function NewProject() {
   const router = useRouter()
   const [title, setTitle] = useState("")
   const [genre, setGenre] = useState("Ciencia Ficción")
   const [duration, setDuration] = useState("corto")
+  const [saving, setSaving] = useState(false)
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!title.trim()) {
       alert("El título es obligatorio")
       return
     }
 
-    // Generar ID único
-    const projectId = `proj_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    
-    // Crear objeto del proyecto
-    const newProject = {
-      id: projectId,
-      title: title.trim(),
-      genre,
-      duration,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      status: "draft",
-      scenes: [],
-      characters: [],
-      script: ""
-    }
-
-    // Obtener proyectos existentes
-    let projects = []
+    setSaving(true)
     try {
-      const stored = localStorage.getItem("video_ia_projects")
-      if (stored) {
-        projects = JSON.parse(stored)
+      const created = await apiCreateProject({
+        title: title.trim(),
+        genre,
+        description: `Duración estimada: ${duration}`,
+      })
+      router.push(`/projects/${created.id}`)
+    } catch (error) {
+      console.warn("Backend no disponible, usando almacenamiento local", error)
+      const projectId = `proj_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      const newProject = {
+        id: projectId,
+        title: title.trim(),
+        genre,
+        duration,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        status: "draft",
+        scenes: [],
+        characters: [],
+        script: ""
       }
-    } catch (error) {
-      console.error("Error leyendo proyectos:", error)
-      projects = []
+
+      try {
+        const stored = localStorage.getItem("video_ia_projects")
+        const projects = stored ? JSON.parse(stored) : []
+        projects.push(newProject)
+        localStorage.setItem("video_ia_projects", JSON.stringify(projects))
+        router.push(`/projects/${projectId}`)
+      } catch (storageError) {
+        console.error("Error guardando proyecto:", storageError)
+        alert("Error al guardar el proyecto")
+      }
+    } finally {
+      setSaving(false)
     }
-
-    // Agregar nuevo proyecto
-    projects.push(newProject)
-
-    // Guardar en localStorage
-    try {
-      localStorage.setItem("video_ia_projects", JSON.stringify(projects))
-    } catch (error) {
-      console.error("Error guardando proyecto:", error)
-      alert("Error al guardar el proyecto")
-      return
-    }
-
-    // Navegar al workspace del proyecto
-    router.push(`/projects/${projectId}`)
   }
 
   return (
@@ -142,9 +138,10 @@ export default function NewProject() {
               </button>
               <button
                 onClick={handleCreate}
-                className="flex-1 px-6 py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-medium rounded-lg transition-colors shadow-lg shadow-cyan-600/20"
+                disabled={saving}
+                className="flex-1 px-6 py-3 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-60 text-white font-medium rounded-lg transition-colors shadow-lg shadow-cyan-600/20"
               >
-                Crear Proyecto
+                {saving ? "Creando..." : "Crear Proyecto"}
               </button>
             </div>
           </div>

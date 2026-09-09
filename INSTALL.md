@@ -79,13 +79,28 @@ docker-compose logs -f
 ## Configuración de Director IA (Gafcore Gateway)
 
 ### Gafcore Gateway
-1. Iniciar tu servidor o gateway local de Gafcore (por defecto en `http://localhost:8080/v1`).
-2. Configurar en tu archivo `.env`:
+1. Configurar en tu archivo `.env` (LLM — distinto de Supabase):
    ```env
-   GAFCORE_GATEWAY_URL=http://localhost:8080/v1
+   GAFCORE_GATEWAY_URL=https://gafcore-gateway.vercel.app/api/openai/v1
    GAFCORE_API_KEY=tu-llave-gafcore
-   GAFCORE_DEFAULT_MODEL=gafcore-director
+   GAFCORE_DEFAULT_MODEL=gpt-5.6-luna
    ```
+
+## Supabase GafCore (instancia dedicada)
+
+Este proyecto usa una instancia aislada:
+
+```env
+SUPABASE_URL=https://supabase.gafcore.com/video-ia-studio
+NEXT_PUBLIC_SUPABASE_URL=https://supabase.gafcore.com/video-ia-studio
+SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+```
+
+- Manifiesto: `project-infra.json`
+- Migraciones Film Bible: `supabase/migrations/`
+- Tarjeta Studio: https://supabase.gafcore.com/db/select/video-ia-studio
+- No mezclar la URL de Supabase con GafCore Gateway (`/gafcore-gateway`).
 
 ## Solución de Problemas
 

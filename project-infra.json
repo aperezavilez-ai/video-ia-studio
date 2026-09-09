@@ -8,5 +8,12 @@
     "instanceId": "video-ia-studio",
     "database": "postgres",
     "schema": "video_ia_studio"
+  },
+  "verification": {
+    "publicUrl": "https://supabase.gafcore.com/video-ia-studio",
+    "rest": "verified",
+    "authHealth": "verified",
+    "studioCard": "registered",
+    "tables": 4
   }
 }

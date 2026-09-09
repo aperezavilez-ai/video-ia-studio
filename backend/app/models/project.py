@@ -24,12 +24,13 @@ class SceneStatus(str, enum.Enum):
 class Project(Base):
     """Film project model"""
     __tablename__ = "projects"
+    __table_args__ = {"schema": "video_ia_studio"}
     
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(255), nullable=False)
     genre = Column(String(100))
     description = Column(Text)
-    status = Column(Enum(ProjectStatus), default=ProjectStatus.DRAFT)
+    status = Column(String(50), default=ProjectStatus.DRAFT.value)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -41,13 +42,14 @@ class Project(Base):
 class Scene(Base):
     """Scene model"""
     __tablename__ = "scenes"
+    __table_args__ = {"schema": "video_ia_studio"}
 
     id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("video_ia_studio.projects.id"), nullable=False)
     number = Column(Integer, nullable=False)
     title = Column(String(255), nullable=False)
     prompt = Column(Text, nullable=False)
-    status = Column(Enum(SceneStatus), default=SceneStatus.PENDING)
+    status = Column(String(50), default=SceneStatus.PENDING.value)
     duration_sec = Column(Integer, default=5)
     video_url = Column(String(512), nullable=True)
 
@@ -59,9 +61,10 @@ class Scene(Base):
 class Character(Base):
     """Character model"""
     __tablename__ = "characters"
+    __table_args__ = {"schema": "video_ia_studio"}
 
     id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("video_ia_studio.projects.id"), nullable=False)
     name = Column(String(255), nullable=False)
     role = Column(String(255))
     prompt = Column(Text)
@@ -74,10 +77,11 @@ class Character(Base):
 class RenderJob(Base):
     """Render Job tracking model"""
     __tablename__ = "render_jobs"
+    __table_args__ = {"schema": "video_ia_studio"}
 
     id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
-    scene_id = Column(Integer, ForeignKey("scenes.id"), nullable=True)
+    project_id = Column(Integer, ForeignKey("video_ia_studio.projects.id"), nullable=False)
+    scene_id = Column(Integer, ForeignKey("video_ia_studio.scenes.id"), nullable=True)
     status = Column(String(50), default="pending")
     progress = Column(Float, default=0.0)
     result_url = Column(String(512), nullable=True)

@@ -64,8 +64,6 @@ const statusLabels = {
   completed: "Completado",
 }
 
-import { fetchProjects as apiFetchProjects, createProject as apiCreateProject, deleteProject as apiDeleteProject } from "@/lib/api"
-
 export default function ProjectsPage() {
   const router = useRouter()
   const [projects, setProjects] = useState<Project[]>(sampleProjects)

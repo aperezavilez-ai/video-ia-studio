@@ -12,13 +12,18 @@ class Settings(BaseSettings):
     
     # Database
     DATABASE_URL: str = "postgresql://admin:changeme@localhost:5432/video_ia_studio"
+
+    # Supabase GafCore (dedicated instance)
+    SUPABASE_URL: str = "https://supabase.gafcore.com/video-ia-studio"
+    SUPABASE_ANON_KEY: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
     
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
     
     # Gafcore Gateway AI Service
     GAFCORE_GATEWAY_URL: str = "https://gafcore-gateway.vercel.app/api/openai/v1"
-    GAFCORE_API_KEY: str = "sk-855baab0e2ffc3f093cd71e2ea2cc4ae6ec3527e1692200ee93bd566e29af6e2"
+    GAFCORE_API_KEY: str = ""
     GAFCORE_DEFAULT_MODEL: str = "gpt-5.6-luna"
     
     # CORS

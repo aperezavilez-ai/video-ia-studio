@@ -36,3 +36,15 @@ storage/renders/*
 .DS_Store
 Thumbs.db
 .editcore/
+.env.*.local
+backend/.env
+frontend/.env.local
+.tmp-*
+storage/
+/models/
+*.bin
+*.log
+*.log.err
+backend/venv/
+frontend/next-dev.log*
+backend/uvicorn.log*
