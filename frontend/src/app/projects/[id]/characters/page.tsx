@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { ArrowLeft, Film, Users, Plus } from "lucide-react"
 
