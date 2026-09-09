@@ -98,10 +98,36 @@ export default function ProjectWorkspace() {
       const stored = localStorage.getItem("video_ia_projects")
       if (stored) {
         const parsed = JSON.parse(stored)
-        const found = parsed.find((p: any) => p.id === projectId)
+        const found = parsed.find((p: any) => String(p.id) === String(projectId))
         if (found) {
           setProjectTitle(found.title)
           if (found.genre) setProjectGenre(found.genre)
+          if (typeof found.script === "string" && found.script.trim()) {
+            setScriptText(found.script)
+          }
+          if (Array.isArray(found.scenes) && found.scenes.length > 0) {
+            setScenes(
+              found.scenes.map((s: any, idx: number) => ({
+                id: String(s.id || `s${idx + 1}`),
+                number: Number(s.number || idx + 1),
+                title: s.title || `Clip ${idx + 1}`,
+                prompt: s.prompt || "",
+                status: s.status || "pending",
+                durationSec: Number(s.durationSec || s.duration_sec || 6),
+              })),
+            )
+            setActiveTab("scenes")
+          }
+          if (Array.isArray(found.characters) && found.characters.length > 0) {
+            setCharacters(
+              found.characters.map((c: any, idx: number) => ({
+                id: String(c.id || `c${idx + 1}`),
+                name: c.name || `Personaje ${idx + 1}`,
+                role: c.role || "",
+                prompt: c.prompt || "",
+              })),
+            )
+          }
         } else {
           setProjectTitle(`Proyecto #${projectId}`)
         }

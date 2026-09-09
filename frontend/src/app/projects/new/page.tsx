@@ -1,61 +1,210 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Film, ArrowLeft, Sparkles } from "lucide-react"
-import { createProject as apiCreateProject } from "@/lib/api"
+import {
+  Film,
+  ArrowLeft,
+  Sparkles,
+  Upload,
+  FileText,
+  Loader2,
+  CheckCircle2,
+  X,
+  Clapperboard,
+  Users,
+  Camera,
+} from "lucide-react"
+import type { ScriptAnalysisResult } from "@/lib/script-analysis"
+
+type CreateResponse = {
+  id: string | number
+  title: string
+  genre: string
+  description?: string
+  status?: string
+  created_at?: string
+  source?: string
+  analysis?: ScriptAnalysisResult | null
+  script_text?: string
+}
 
 export default function NewProject() {
   const router = useRouter()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   const [title, setTitle] = useState("")
   const [genre, setGenre] = useState("Ciencia Ficción")
   const [duration, setDuration] = useState("corto")
+  const [file, setFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
+  const [phase, setPhase] = useState<"idle" | "analyzing" | "creating">("idle")
+  const [error, setError] = useState("")
+  const [preview, setPreview] = useState<{
+    clips: number
+    characters: number
+    analysisTitle?: string
+  } | null>(null)
+
+  const onPickFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files?.[0]
+    if (!selected) return
+    if (!selected.name.toLowerCase().endsWith(".docx")) {
+      setError("Solo se aceptan guiones Word (.docx)")
+      setFile(null)
+      return
+    }
+    setError("")
+    setFile(selected)
+    setPreview(null)
+    if (!title.trim()) {
+      setTitle(selected.name.replace(/\.docx$/i, "").replace(/[_-]+/g, " "))
+    }
+  }
+
+  const clearFile = () => {
+    setFile(null)
+    setPreview(null)
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
+  const persistLocalProject = (payload: CreateResponse) => {
+    const analysis = payload.analysis
+    const project = {
+      id: String(payload.id),
+      title: payload.title,
+      genre: payload.genre,
+      duration,
+      createdAt: payload.created_at || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      status: "draft",
+      script: payload.script_text || "",
+      continuity_bible: analysis?.continuity_bible || "",
+      logline: analysis?.logline || "",
+      locations: analysis?.locations || [],
+      characters: (analysis?.characters || []).map((c, idx) => ({
+        id: `c${idx + 1}`,
+        name: c.name,
+        role: [c.role, c.voice_type ? `Voz: ${c.voice_type}` : ""].filter(Boolean).join(" · "),
+        prompt: [c.prompt, c.appearance, c.wardrobe, c.continuity_notes].filter(Boolean).join(" | "),
+        appearance: c.appearance,
+        wardrobe: c.wardrobe,
+        voice_type: c.voice_type,
+      })),
+      scenes: (analysis?.clips || []).map((clip) => ({
+        id: `s${clip.number}`,
+        number: clip.number,
+        title: clip.title,
+        prompt: clip.prompt,
+        status: "pending",
+        durationSec: Number(clip.duration_sec) || 6,
+        slugline: clip.slugline,
+        location: clip.location,
+        dialogues: clip.dialogues || [],
+        camera: clip.camera,
+        visual_intention: clip.visual_intention,
+        verbal_intention: clip.verbal_intention,
+        wardrobe_continuity: clip.wardrobe_continuity,
+        continuity_in: clip.continuity_in,
+        continuity_out: clip.continuity_out,
+        mood: clip.mood,
+      })),
+    }
+
+    const stored = localStorage.getItem("video_ia_projects")
+    const projects = stored ? JSON.parse(stored) : []
+    const next = Array.isArray(projects) ? projects.filter((p: { id: string }) => p.id !== project.id) : []
+    next.unshift(project)
+    localStorage.setItem("video_ia_projects", JSON.stringify(next))
+    return project.id
+  }
 
   const handleCreate = async () => {
     if (!title.trim()) {
-      alert("El título es obligatorio")
+      setError("El título es obligatorio")
       return
     }
 
     setSaving(true)
+    setError("")
+
     try {
-      const created = await apiCreateProject({
-        title: title.trim(),
-        genre,
-        description: `Duración estimada: ${duration}`,
-      })
-      router.push(`/projects/${created.id}`)
-    } catch (error) {
-      console.warn("Backend no disponible, usando almacenamiento local", error)
-      const projectId = `proj_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-      const newProject = {
-        id: projectId,
-        title: title.trim(),
-        genre,
-        duration,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        status: "draft",
-        scenes: [],
-        characters: [],
-        script: ""
+      let analysis: ScriptAnalysisResult | null = null
+      let scriptText = ""
+
+      if (file) {
+        setPhase("analyzing")
+        const form = new FormData()
+        form.append("file", file)
+        const analyzeRes = await fetch("/api/script/analyze", {
+          method: "POST",
+          body: form,
+        })
+        const analyzeData = await analyzeRes.json()
+        if (!analyzeRes.ok) {
+          throw new Error(analyzeData.detail || "No se pudo analizar el guion")
+        }
+        analysis = analyzeData.analysis as ScriptAnalysisResult
+        scriptText = analyzeData.script_text || ""
+        setPreview({
+          clips: analysis.clips?.length || 0,
+          characters: analysis.characters?.length || 0,
+          analysisTitle: analysis.title,
+        })
+        if (analysis.title && title.trim().length < 3) {
+          setTitle(analysis.title)
+        }
+        if (analysis.genre) {
+          setGenre(analysis.genre)
+        }
       }
 
-      try {
-        const stored = localStorage.getItem("video_ia_projects")
-        const projects = stored ? JSON.parse(stored) : []
-        projects.push(newProject)
-        localStorage.setItem("video_ia_projects", JSON.stringify(projects))
-        router.push(`/projects/${projectId}`)
-      } catch (storageError) {
-        console.error("Error guardando proyecto:", storageError)
-        alert("Error al guardar el proyecto")
+      setPhase("creating")
+      const createRes = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: (analysis?.title || title).trim(),
+          genre: analysis?.genre || genre,
+          duration,
+          description: `Duración estimada: ${duration}`,
+          script_text: scriptText,
+          analysis,
+        }),
+      })
+      const created = (await createRes.json()) as CreateResponse & { detail?: string }
+      if (!createRes.ok) {
+        throw new Error(created.detail || "No se pudo crear el proyecto")
       }
+
+      const projectId = persistLocalProject({
+        ...created,
+        analysis: created.analysis || analysis,
+        script_text: created.script_text || scriptText,
+        title: created.title || title.trim(),
+        genre: created.genre || genre,
+      })
+
+      router.push(`/projects/${projectId}`)
+    } catch (err) {
+      console.error(err)
+      setError(err instanceof Error ? err.message : "Error al crear el proyecto")
     } finally {
       setSaving(false)
+      setPhase("idle")
     }
   }
+
+  const phaseLabel =
+    phase === "analyzing"
+      ? "Analizando guion y fragmentando clips..."
+      : phase === "creating"
+        ? "Creando proyecto y film bible..."
+        : saving
+          ? "Creando..."
+          : file
+            ? "Crear y fragmentar con IA"
+            : "Crear Proyecto"
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
@@ -127,21 +276,107 @@ export default function NewProject() {
                   <option value="largo">Largometraje (60+ min)</option>
                 </select>
               </div>
+
+              <div className="pt-2">
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Guion Word (.docx)
+                </label>
+                <p className="text-sm text-slate-400 mb-3">
+                  La IA recibe el archivo, lo analiza y lo fragmenta en clips cuidando continuidad,
+                  personajes, vestimenta, locación, diálogo, tipo de voz, transiciones de cámara e
+                  intenciones verbales y visuales.
+                </p>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  className="hidden"
+                  onChange={onPickFile}
+                />
+
+                {!file ? (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full border border-dashed border-slate-600 hover:border-cyan-600/60 rounded-xl px-4 py-8 bg-slate-950/40 transition-colors text-center"
+                  >
+                    <Upload className="h-8 w-8 text-cyan-400 mx-auto mb-3" />
+                    <div className="text-white font-medium">Subir guion en Word</div>
+                    <div className="text-slate-400 text-sm mt-1">Arrastra o selecciona un .docx</div>
+                  </button>
+                ) : (
+                  <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="h-10 w-10 rounded-lg bg-cyan-600/15 flex items-center justify-center shrink-0">
+                          <FileText className="h-5 w-5 text-cyan-400" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-white font-medium truncate">{file.name}</div>
+                          <div className="text-slate-400 text-sm">
+                            {(file.size / 1024).toFixed(1)} KB · listo para análisis
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={clearFile}
+                        className="p-2 rounded-lg hover:bg-slate-800 text-slate-400"
+                        aria-label="Quitar archivo"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      <div className="rounded-lg bg-slate-900 border border-slate-800 p-2 text-slate-300 flex items-center gap-2">
+                        <Clapperboard className="h-3.5 w-3.5 text-cyan-400" />
+                        Clips
+                      </div>
+                      <div className="rounded-lg bg-slate-900 border border-slate-800 p-2 text-slate-300 flex items-center gap-2">
+                        <Users className="h-3.5 w-3.5 text-cyan-400" />
+                        Personajes
+                      </div>
+                      <div className="rounded-lg bg-slate-900 border border-slate-800 p-2 text-slate-300 flex items-center gap-2">
+                        <Camera className="h-3.5 w-3.5 text-cyan-400" />
+                        Continuidad
+                      </div>
+                    </div>
+
+                    {preview && (
+                      <div className="flex items-center gap-2 text-sm text-emerald-400">
+                        <CheckCircle2 className="h-4 w-4" />
+                        Detectados {preview.clips} clips y {preview.characters} personajes
+                        {preview.analysisTitle ? ` · ${preview.analysisTitle}` : ""}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div className="pt-4 flex gap-4">
+            {error && (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                {error}
+              </div>
+            )}
+
+            <div className="pt-2 flex gap-4">
               <button
                 onClick={() => router.push("/projects")}
-                className="flex-1 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors"
+                disabled={saving}
+                className="flex-1 px-6 py-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-60 text-white rounded-lg transition-colors"
               >
                 Cancelar
               </button>
               <button
                 onClick={handleCreate}
                 disabled={saving}
-                className="flex-1 px-6 py-3 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-60 text-white font-medium rounded-lg transition-colors shadow-lg shadow-cyan-600/20"
+                className="flex-1 px-6 py-3 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-60 text-white font-medium rounded-lg transition-colors shadow-lg shadow-cyan-600/20 inline-flex items-center justify-center gap-2"
               >
-                {saving ? "Creando..." : "Crear Proyecto"}
+                {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+                {phaseLabel}
               </button>
             </div>
           </div>

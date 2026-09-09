@@ -89,45 +89,93 @@ class GafcoreGatewayClient:
 
     async def analyze_and_parse_script(self, script_text: str) -> Dict[str, Any]:
         """
-        Analiza un guion completo y extrae automaticamente personajes, locaciones,
-        escenas y prompts de generación visual en formato JSON estructurado.
+        Analiza un guion completo y lo fragmenta en clips de producción con
+        continuidad, vestuario, locación, diálogo, voz, cámara e intenciones.
         """
         system_prompt = (
-            "Eres un Asistente Director de Cine especializado en desglose de guiones. "
-            "Tu tarea es analizar el texto del guion entregado y responder ÚNICAMENTE con un JSON válido "
-            "con la siguiente estructura exacta sin texto explicativo extra:\n"
+            "Eres el Director de Cine IA de Video IA Studio. "
+            "Analiza el guion y responde ÚNICAMENTE con JSON válido (sin markdown) con esta estructura:\n"
             "{\n"
-            '  "title": "Título del proyecto",\n'
-            '  "genre": "Género cinemático",\n'
-            '  "characters": [{"name": "Nombre", "role": "Rol/Descripción", "prompt": "Prompt visual de apariencia"}],\n'
-            '  "locations": [{"name": "Nombre de locación", "description": "Descripción visual"}],\n'
-            '  "scenes": [\n'
-            '    {\n'
-            '      "number": 1,\n'
-            '      "title": "Título o encabezado de la escena",\n'
-            '      "prompt": "Prompt cinematográfico detallado para generación de video de 8k (iluminación, toma de cámara, estilo)",\n'
-            '      "duration_sec": 6,\n'
-            '      "dialogues": [{"character": "Nombre Personaje", "text": "Texto del diálogo"}]\n'
-            '    }\n'
-            '  ]\n'
-            "}"
+            '  "title": "Título",\n'
+            '  "genre": "Género",\n'
+            '  "logline": "Logline",\n'
+            '  "characters": [{"name":"","role":"","appearance":"","wardrobe":"","voice_type":"","personality":"","continuity_notes":"","prompt":""}],\n'
+            '  "locations": [{"name":"","time_of_day":"","description":"","lighting":"","atmosphere":""}],\n'
+            '  "scenes": [{\n'
+            '    "number": 1,\n'
+            '    "title": "",\n'
+            '    "slugline": "INT./EXT. LOC - TIEMPO",\n'
+            '    "location": "",\n'
+            '    "time_of_day": "",\n'
+            '    "summary": "",\n'
+            '    "action": "",\n'
+            '    "characters_present": [],\n'
+            '    "wardrobe_continuity": "",\n'
+            '    "dialogues": [{"character":"","text":"","delivery":"","verbal_intention":""}],\n'
+            '    "camera": {"shot_type":"","movement":"","transition_in":"","transition_out":"","lens_mood":""},\n'
+            '    "visual_intention": "",\n'
+            '    "verbal_intention": "",\n'
+            '    "continuity_in": "",\n'
+            '    "continuity_out": "",\n'
+            '    "duration_sec": 6,\n'
+            '    "mood": "",\n'
+            '    "prompt": "prompt cinematográfico detallado en inglés"\n'
+            "  }],\n"
+            '  "continuity_bible": ""\n'
+            "}\n"
+            "Cuida continuidad entre clips, vestimenta, locación, diálogos, tipo de voz, "
+            "transiciones de cámara e intenciones verbales/visuales."
         )
 
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Analiza y desglosa el siguiente guion:\n\n{script_text}"}
+            {"role": "user", "content": f"Analiza y fragmenta el siguiente guion en clips:\n\n{script_text[:48000]}"}
         ]
 
-        res = await self.chat_completion(messages=messages, temperature=0.3)
+        res = await self.chat_completion(messages=messages, temperature=0.25)
         try:
             content = res["choices"][0]["message"]["content"]
-            # Extraer bloque JSON si el modelo devolvio markdown ```json ... ```
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0].strip()
             elif "```" in content:
                 content = content.split("```")[1].split("```")[0].strip()
             import json
-            return json.loads(content)
+            data = json.loads(content)
+            # Compat: mapear clips -> scenes si el modelo usó "clips"
+            if "scenes" not in data and "clips" in data:
+                data["scenes"] = data["clips"]
+            # Enriquecer prompt de escena con metadatos de continuidad
+            for sc in data.get("scenes", []):
+                if not sc.get("prompt"):
+                    sc["prompt"] = sc.get("summary") or sc.get("action") or "Cinematic scene 8k"
+                extras = []
+                if sc.get("wardrobe_continuity"):
+                    extras.append(f"Wardrobe continuity: {sc['wardrobe_continuity']}")
+                if sc.get("visual_intention"):
+                    extras.append(f"Visual intention: {sc['visual_intention']}")
+                if sc.get("verbal_intention"):
+                    extras.append(f"Verbal intention: {sc['verbal_intention']}")
+                cam = sc.get("camera") or {}
+                if cam:
+                    extras.append(
+                        f"Camera: {cam.get('shot_type','')}/{cam.get('movement','')}; "
+                        f"{cam.get('transition_in','')}->{cam.get('transition_out','')}"
+                    )
+                if extras:
+                    sc["prompt"] = f"{sc['prompt']}\n" + "\n".join(extras)
+                # Character prompt enrichment
+            for char in data.get("characters", []):
+                bits = [char.get("prompt") or ""]
+                if char.get("appearance"):
+                    bits.append(f"Appearance: {char['appearance']}")
+                if char.get("wardrobe"):
+                    bits.append(f"Wardrobe: {char['wardrobe']}")
+                if char.get("voice_type"):
+                    bits.append(f"Voice: {char['voice_type']}")
+                char["prompt"] = " | ".join([b for b in bits if b])
+                if char.get("voice_type") and char.get("role"):
+                    char["role"] = f"{char['role']} · Voz: {char['voice_type']}"
+            return data
         except Exception as e:
             logger.error(f"Error parseando respuesta JSON de Gafcore Gateway: {e}")
             return {
