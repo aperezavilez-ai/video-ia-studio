@@ -15,7 +15,12 @@ import {
   Users,
   Camera,
 } from "lucide-react"
-import { buildHeuristicAnalysis, type ScriptAnalysisResult } from "@/lib/script-analysis"
+import {
+  buildHeuristicAnalysis,
+  formatClipProductionScript,
+  type ScriptAnalysisResult,
+  type ScriptClip,
+} from "@/lib/script-analysis"
 import { extractDocxTextFromFile } from "@/lib/docx"
 
 type CreateResponse = {
@@ -30,18 +35,29 @@ type CreateResponse = {
   script_text?: string
 }
 
-async function readApiJson<T = any>(res: Response): Promise<T> {
-  const raw = await res.text()
-  try {
-    return JSON.parse(raw) as T
-  } catch {
-    const snippet = raw.replace(/\s+/g, " ").slice(0, 180)
-    throw new Error(
-      res.status >= 500
-        ? `El servidor falló (${res.status}). ${snippet || "Respuesta no JSON"}`
-        : `Respuesta inválida del servidor (${res.status}): ${snippet}`,
-    )
-  }
+function toLocalScenes(clips: ScriptClip[]) {
+  return clips.map((clip) => ({
+    id: `s${clip.number}`,
+    number: clip.number,
+    title: clip.title,
+    prompt: clip.prompt,
+    status: "pending" as const,
+    durationSec: Number(clip.duration_sec) || 6,
+    slugline: clip.slugline,
+    location: clip.location,
+    time_of_day: clip.time_of_day,
+    summary: clip.summary,
+    action: clip.action,
+    dialogues: clip.dialogues || [],
+    camera: clip.camera,
+    visual_intention: clip.visual_intention,
+    verbal_intention: clip.verbal_intention,
+    wardrobe_continuity: clip.wardrobe_continuity,
+    continuity_in: clip.continuity_in,
+    continuity_out: clip.continuity_out,
+    mood: clip.mood,
+    production_script: formatClipProductionScript(clip),
+  }))
 }
 
 export default function NewProject() {
@@ -53,13 +69,9 @@ export default function NewProject() {
   const [duration, setDuration] = useState("corto")
   const [file, setFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
-  const [phase, setPhase] = useState<"idle" | "extracting" | "splitting" | "enriching" | "creating">("idle")
+  const [phase, setPhase] = useState<"idle" | "extracting" | "splitting" | "creating">("idle")
   const [error, setError] = useState("")
-  const [preview, setPreview] = useState<{
-    clips: number
-    characters: number
-    analysisTitle?: string
-  } | null>(null)
+  const [analysis, setAnalysis] = useState<ScriptAnalysisResult | null>(null)
 
   const onPickFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0]
@@ -67,11 +79,12 @@ export default function NewProject() {
     if (!selected.name.toLowerCase().endsWith(".docx")) {
       setError("Solo se aceptan guiones Word (.docx)")
       setFile(null)
+      setAnalysis(null)
       return
     }
     setError("")
     setFile(selected)
-    setPreview(null)
+    setAnalysis(null)
     if (!title.trim()) {
       setTitle(selected.name.replace(/\.docx$/i, "").replace(/[_-]+/g, " "))
     }
@@ -79,12 +92,11 @@ export default function NewProject() {
 
   const clearFile = () => {
     setFile(null)
-    setPreview(null)
+    setAnalysis(null)
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
-  const persistLocalProject = (payload: CreateResponse) => {
-    const analysis = payload.analysis
+  const persistLocalProject = (payload: CreateResponse, fullAnalysis: ScriptAnalysisResult, fullScript: string) => {
     const project = {
       id: String(payload.id),
       title: payload.title,
@@ -93,11 +105,11 @@ export default function NewProject() {
       createdAt: payload.created_at || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       status: "draft",
-      script: payload.script_text || "",
-      continuity_bible: analysis?.continuity_bible || "",
-      logline: analysis?.logline || "",
-      locations: analysis?.locations || [],
-      characters: (analysis?.characters || []).map((c, idx) => ({
+      script: fullScript.slice(0, 80_000),
+      continuity_bible: fullAnalysis.continuity_bible || "",
+      logline: fullAnalysis.logline || "",
+      locations: fullAnalysis.locations || [],
+      characters: (fullAnalysis.characters || []).map((c, idx) => ({
         id: `c${idx + 1}`,
         name: c.name,
         role: [c.role, c.voice_type ? `Voz: ${c.voice_type}` : ""].filter(Boolean).join(" · "),
@@ -106,31 +118,30 @@ export default function NewProject() {
         wardrobe: c.wardrobe,
         voice_type: c.voice_type,
       })),
-      scenes: (analysis?.clips || []).map((clip) => ({
-        id: `s${clip.number}`,
-        number: clip.number,
-        title: clip.title,
-        prompt: clip.prompt,
-        status: "pending",
-        durationSec: Number(clip.duration_sec) || 6,
-        slugline: clip.slugline,
-        location: clip.location,
-        dialogues: clip.dialogues || [],
-        camera: clip.camera,
-        visual_intention: clip.visual_intention,
-        verbal_intention: clip.verbal_intention,
-        wardrobe_continuity: clip.wardrobe_continuity,
-        continuity_in: clip.continuity_in,
-        continuity_out: clip.continuity_out,
-        mood: clip.mood,
-      })),
+      scenes: toLocalScenes(fullAnalysis.clips || []),
+      from_script: true,
     }
 
-    const stored = localStorage.getItem("video_ia_projects")
-    const projects = stored ? JSON.parse(stored) : []
-    const next = Array.isArray(projects) ? projects.filter((p: { id: string }) => p.id !== project.id) : []
-    next.unshift(project)
-    localStorage.setItem("video_ia_projects", JSON.stringify(next))
+    try {
+      const stored = localStorage.getItem("video_ia_projects")
+      const projects = stored ? JSON.parse(stored) : []
+      const next = Array.isArray(projects) ? projects.filter((p: { id: string }) => p.id !== project.id) : []
+      next.unshift(project)
+      localStorage.setItem("video_ia_projects", JSON.stringify(next))
+    } catch (err) {
+      // Si el guion es demasiado grande para localStorage, guarda versión compacta
+      console.warn("localStorage full, saving compact project", err)
+      const compact = {
+        ...project,
+        script: fullScript.slice(0, 10_000),
+        scenes: project.scenes.map((s) => ({
+          ...s,
+          action: (s.action || "").slice(0, 800),
+          production_script: (s.production_script || "").slice(0, 2500),
+        })),
+      }
+      localStorage.setItem("video_ia_projects", JSON.stringify([compact]))
+    }
     return project.id
   }
 
@@ -139,99 +150,69 @@ export default function NewProject() {
       setError("El título es obligatorio")
       return
     }
+    if (!file) {
+      setError("Sube el guion Word (.docx) para fragmentarlo en clips")
+      return
+    }
 
     setSaving(true)
     setError("")
 
     try {
-      let analysis: ScriptAnalysisResult | null = null
-      let scriptText = ""
+      setPhase("extracting")
+      const scriptFromDocx = await extractDocxTextFromFile(file)
 
-      if (file) {
-        setPhase("extracting")
-        const scriptFromDocx = await extractDocxTextFromFile(file)
-        scriptText = scriptFromDocx
+      setPhase("splitting")
+      const localAnalysis = buildHeuristicAnalysis(scriptFromDocx, {
+        title: title.trim() || file.name.replace(/\.docx$/i, ""),
+        genre,
+        duration,
+      })
 
-        setPhase("splitting")
-        // Fragmentación local inmediata (no depende del timeout de Vercel)
-        const localSplit = buildHeuristicAnalysis(scriptFromDocx, {
-          title: title.trim() || file.name.replace(/\.docx$/i, ""),
-          genre,
-          duration,
-        })
-        analysis = localSplit
-        setPreview({
-          clips: localSplit.clips.length,
-          characters: localSplit.characters.length,
-          analysisTitle: localSplit.title,
-        })
-
-        setPhase("enriching")
-        try {
-          const analyzeRes = await fetch("/api/script/analyze", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              script_text: scriptFromDocx,
-              filename: file.name,
-              duration,
-              title: title.trim(),
-              genre,
-            }),
-          })
-          const analyzeData = await readApiJson<{
-            detail?: string
-            analysis?: ScriptAnalysisResult
-            script_text?: string
-          }>(analyzeRes)
-          if (analyzeRes.ok && analyzeData.analysis?.clips?.length) {
-            analysis = analyzeData.analysis
-            scriptText = analyzeData.script_text || scriptFromDocx
-            setPreview({
-              clips: analysis.clips.length,
-              characters: analysis.characters?.length || 0,
-              analysisTitle: analysis.title,
-            })
-          }
-        } catch (analyzeErr) {
-          console.warn("Enriquecimiento IA falló; se usan clips locales", analyzeErr)
-        }
-
-        if (analysis.title && title.trim().length < 3) {
-          setTitle(analysis.title)
-        }
-        if (analysis.genre) {
-          setGenre(analysis.genre)
-        }
+      if (!localAnalysis.clips.length) {
+        throw new Error("No se pudieron detectar escenas en el guion. Revisa que el Word tenga texto.")
       }
 
+      setAnalysis(localAnalysis)
       setPhase("creating")
-      const createRes = await fetch("/api/projects", {
+
+      // Guardar clips YA en el navegador y abrir el estudio (sin esperar servidor/gateway)
+      const localId = `proj_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
+      const projectId = persistLocalProject(
+        {
+          id: localId,
+          title: (localAnalysis.title || title).trim(),
+          genre: localAnalysis.genre || genre,
+          status: "draft",
+          created_at: new Date().toISOString(),
+          source: "local",
+        },
+        localAnalysis,
+        scriptFromDocx,
+      )
+
+      // Persistencia remota en segundo plano (no bloquea la UI)
+      void fetch("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: (analysis?.title || title).trim(),
-          genre: analysis?.genre || genre,
+          title: (localAnalysis.title || title).trim(),
+          genre: localAnalysis.genre || genre,
           duration,
-          description: `Duración estimada: ${duration}`,
-          script_text: scriptText,
-          analysis,
+          description: `Duración estimada: ${duration} · ${localAnalysis.clips.length} clips`,
+          script_text: scriptFromDocx.slice(0, 60_000),
+          analysis: {
+            ...localAnalysis,
+            clips: localAnalysis.clips.map((c) => ({
+              ...c,
+              action: c.action.slice(0, 1200),
+              prompt: c.prompt.slice(0, 1500),
+            })),
+          },
         }),
-      })
-      const created = await readApiJson<CreateResponse & { detail?: string }>(createRes)
-      if (!createRes.ok) {
-        throw new Error(created.detail || "No se pudo crear el proyecto")
-      }
+      }).catch((err) => console.warn("Sync remoto diferido", err))
 
-      const projectId = persistLocalProject({
-        ...created,
-        analysis: created.analysis || analysis,
-        script_text: created.script_text || scriptText,
-        title: created.title || title.trim(),
-        genre: created.genre || genre,
-      })
-
-      router.push(`/projects/${projectId}`)
+      router.push(`/projects/${projectId}?tab=scenes`)
     } catch (err) {
       console.error(err)
       setError(err instanceof Error ? err.message : "Error al crear el proyecto")
@@ -246,15 +227,13 @@ export default function NewProject() {
       ? "Leyendo Word..."
       : phase === "splitting"
         ? "Dividiendo guion en clips..."
-        : phase === "enriching"
-          ? "Enriqueciendo continuidad con IA..."
-          : phase === "creating"
-            ? "Creando proyecto y film bible..."
-            : saving
-              ? "Creando..."
-              : file
-                ? "Crear y fragmentar con IA"
-                : "Crear Proyecto"
+        : phase === "creating"
+          ? "Guardando clips listos para producción..."
+          : saving
+            ? "Creando..."
+            : file
+              ? "Crear clips de producción"
+              : "Crear Proyecto"
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
@@ -271,7 +250,7 @@ export default function NewProject() {
       </header>
 
       <section className="container mx-auto px-4 py-12">
-        <div className="max-w-2xl mx-auto">
+        <div className="max-w-3xl mx-auto">
           <div className="p-8 bg-slate-900/50 border border-slate-800 rounded-xl space-y-6">
             <div className="inline-flex items-center gap-2 px-4 py-2 bg-cyan-600/10 border border-cyan-600/20 rounded-full">
               <Sparkles className="h-4 w-4 text-cyan-400" />
@@ -280,9 +259,7 @@ export default function NewProject() {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Título del Proyecto *
-                </label>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Título del Proyecto *</label>
                 <input
                   type="text"
                   value={title}
@@ -293,9 +270,7 @@ export default function NewProject() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Género
-                </label>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Género</label>
                 <select
                   value={genre}
                   onChange={(e) => setGenre(e.target.value)}
@@ -313,9 +288,7 @@ export default function NewProject() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Duración Estimada
-                </label>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Duración Estimada</label>
                 <select
                   value={duration}
                   onChange={(e) => setDuration(e.target.value)}
@@ -328,13 +301,10 @@ export default function NewProject() {
               </div>
 
               <div className="pt-2">
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Guion Word (.docx)
-                </label>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Guion Word (.docx) *</label>
                 <p className="text-sm text-slate-400 mb-3">
-                  La IA recibe el archivo, lo analiza y lo fragmenta en clips cuidando continuidad,
-                  personajes, vestimenta, locación, diálogo, tipo de voz, transiciones de cámara e
-                  intenciones verbales y visuales.
+                  Al crear el proyecto, el guion se divide al instante en clips con slugline, diálogos,
+                  cámara, continuidad y prompt listo para producción.
                 </p>
 
                 <input
@@ -365,7 +335,7 @@ export default function NewProject() {
                         <div className="min-w-0">
                           <div className="text-white font-medium truncate">{file.name}</div>
                           <div className="text-slate-400 text-sm">
-                            {(file.size / 1024).toFixed(1)} KB · listo para análisis
+                            {(file.size / 1024).toFixed(1)} KB · listo para fragmentar
                           </div>
                         </div>
                       </div>
@@ -382,54 +352,70 @@ export default function NewProject() {
                     <div className="grid grid-cols-3 gap-2 text-xs">
                       <div
                         className={`rounded-lg border p-2 flex items-center gap-2 ${
-                          preview
+                          analysis
                             ? "bg-cyan-600/10 border-cyan-600/30 text-cyan-200"
                             : "bg-slate-900 border-slate-800 text-slate-300"
                         }`}
                       >
                         <Clapperboard className="h-3.5 w-3.5 text-cyan-400" />
-                        {preview ? `${preview.clips} clips` : "Clips"}
+                        {analysis ? `${analysis.clips.length} clips` : "Clips"}
                       </div>
                       <div
                         className={`rounded-lg border p-2 flex items-center gap-2 ${
-                          preview
+                          analysis
                             ? "bg-cyan-600/10 border-cyan-600/30 text-cyan-200"
                             : "bg-slate-900 border-slate-800 text-slate-300"
                         }`}
                       >
                         <Users className="h-3.5 w-3.5 text-cyan-400" />
-                        {preview ? `${preview.characters} pers.` : "Personajes"}
+                        {analysis ? `${analysis.characters.length} pers.` : "Personajes"}
                       </div>
-                      <div
-                        className={`rounded-lg border p-2 flex items-center gap-2 ${
-                          phase === "enriching" || preview
-                            ? "bg-cyan-600/10 border-cyan-600/30 text-cyan-200"
-                            : "bg-slate-900 border-slate-800 text-slate-300"
-                        }`}
-                      >
+                      <div className="rounded-lg bg-slate-900 border border-slate-800 p-2 text-slate-300 flex items-center gap-2">
                         <Camera className="h-3.5 w-3.5 text-cyan-400" />
                         Continuidad
                       </div>
                     </div>
 
-                    {saving && phase !== "idle" && (
+                    {saving && (
                       <div className="text-sm text-cyan-300/90 flex items-center gap-2">
                         <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
                         {phaseLabel}
-                      </div>
-                    )}
-
-                    {preview && (
-                      <div className="flex items-center gap-2 text-sm text-emerald-400">
-                        <CheckCircle2 className="h-4 w-4" />
-                        Detectados {preview.clips} clips y {preview.characters} personajes
-                        {preview.analysisTitle ? ` · ${preview.analysisTitle}` : ""}
                       </div>
                     )}
                   </div>
                 )}
               </div>
             </div>
+
+            {analysis && analysis.clips.length > 0 && (
+              <div className="space-y-3 border-t border-slate-800 pt-6">
+                <div className="flex items-center gap-2 text-emerald-400 text-sm">
+                  <CheckCircle2 className="h-4 w-4" />
+                  {analysis.clips.length} guiones de clip listos · {analysis.characters.length} personajes
+                </div>
+                <div className="max-h-80 overflow-y-auto space-y-3 pr-1">
+                  {analysis.clips.slice(0, 8).map((clip) => (
+                    <details
+                      key={clip.number}
+                      className="rounded-lg border border-slate-700 bg-slate-950/70 open:border-cyan-700/40"
+                    >
+                      <summary className="cursor-pointer px-3 py-2 text-sm text-white font-medium list-none flex items-center gap-2">
+                        <span className="text-cyan-400 font-mono text-xs">#{clip.number}</span>
+                        <span className="truncate">{clip.slugline || clip.title}</span>
+                      </summary>
+                      <pre className="px-3 pb-3 text-[11px] leading-relaxed text-slate-300 whitespace-pre-wrap font-mono border-t border-slate-800/80 pt-2">
+                        {formatClipProductionScript(clip)}
+                      </pre>
+                    </details>
+                  ))}
+                  {analysis.clips.length > 8 && (
+                    <p className="text-xs text-slate-500">
+                      +{analysis.clips.length - 8} clips más se verán en el estudio tras crear el proyecto.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
 
             {error && (
               <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
@@ -447,7 +433,7 @@ export default function NewProject() {
               </button>
               <button
                 onClick={handleCreate}
-                disabled={saving}
+                disabled={saving || !file}
                 className="flex-1 px-6 py-3 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-60 text-white font-medium rounded-lg transition-colors shadow-lg shadow-cyan-600/20 inline-flex items-center justify-center gap-2"
               >
                 {saving && <Loader2 className="h-4 w-4 animate-spin" />}

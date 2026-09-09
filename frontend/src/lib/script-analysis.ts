@@ -165,6 +165,39 @@ export function buildClipGenerationPrompt(clip: ScriptClip, characters: ScriptCh
     .join(" ")
 }
 
+/** Guion de producción listo para generar cada clip (texto legible). */
+export function formatClipProductionScript(clip: ScriptClip): string {
+  const dialogues =
+    clip.dialogues?.length > 0
+      ? clip.dialogues
+          .map(
+            (d) =>
+              `${d.character}\n(${d.delivery || "natural"} · ${d.verbal_intention || "intención verbal"})\n${d.text}`,
+          )
+          .join("\n\n")
+      : "(Sin diálogo — acción visual)"
+
+  return [
+    clip.slugline || `CLIP ${clip.number}`,
+    "",
+    `RESUMEN: ${clip.summary || clip.title}`,
+    `ACCIÓN: ${clip.action || ""}`,
+    "",
+    "DIÁLOGOS:",
+    dialogues,
+    "",
+    `CÁMARA: ${clip.camera?.shot_type || "medium"} / ${clip.camera?.movement || "static"} | in:${clip.camera?.transition_in || "cut"} → out:${clip.camera?.transition_out || "cut"} | ${clip.camera?.lens_mood || ""}`,
+    `INTENCIÓN VISUAL: ${clip.visual_intention || ""}`,
+    `INTENCIÓN VERBAL: ${clip.verbal_intention || ""}`,
+    `CONTINUIDAD IN: ${clip.continuity_in || ""}`,
+    `CONTINUIDAD OUT: ${clip.continuity_out || ""}`,
+    `VESTUARIO: ${clip.wardrobe_continuity || ""}`,
+    `DURACIÓN: ${clip.duration_sec || 6}s · MOOD: ${clip.mood || ""}`,
+    "",
+    `PROMPT GENERACIÓN:\n${clip.prompt || ""}`,
+  ].join("\n")
+}
+
 export function safeParseAnalysisJson(raw: string): ScriptAnalysisResult {
   let content = raw.trim()
   if (content.includes("```json")) {
@@ -198,7 +231,7 @@ export type RawSceneChunk = {
 }
 
 const SLUGLINE_RE =
-  /^(?:\s*(?:\d+[A-Z]?\s*)?(?:INT\.?|EXT\.?|INT\/EXT\.?|I\/E\.?|EST\.?)\s*[.\-–—:]?\s*.+)$/gim
+  /^(?:\s*(?:\d+[A-Z]?\s*[.\-–—:]?\s*)?(?:INT\.?\/EXT\.?|INT\.?|EXT\.?|I\/E\.?|EST\.?|ESCENA\s+\d+)\b.*)$/gim
 
 export function splitScriptIntoRawScenes(scriptText: string, maxClips = 18): RawSceneChunk[] {
   const text = scriptText.replace(/\r\n/g, "\n").trim()
@@ -206,15 +239,26 @@ export function splitScriptIntoRawScenes(scriptText: string, maxClips = 18): Raw
 
   const matches = Array.from(text.matchAll(SLUGLINE_RE))
   if (matches.length === 0) {
-    // Sin encabezados: trocea por bloques de párrafos
-    const paras = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
-    const chunkSize = Math.max(1, Math.ceil(paras.length / Math.min(maxClips, 12)))
+    // Sin encabezados de escena: trocea por bloques / líneas densas
+    const paras = text
+      .split(/\n{2,}/)
+      .map((p) => p.trim())
+      .filter((p) => p.length > 40)
+    const source = paras.length >= 2 ? paras : text.split(/\n/).reduce<string[]>((acc, line) => {
+      const t = line.trim()
+      if (!t) return acc
+      if (!acc.length || acc[acc.length - 1].length > 500) acc.push(t)
+      else acc[acc.length - 1] += `\n${t}`
+      return acc
+    }, [])
+    const target = Math.min(maxClips, Math.max(4, Math.ceil(source.length / 2)))
+    const chunkSize = Math.max(1, Math.ceil(source.length / target))
     const chunks: RawSceneChunk[] = []
-    for (let i = 0; i < paras.length && chunks.length < maxClips; i += chunkSize) {
-      const body = paras.slice(i, i + chunkSize).join("\n\n")
+    for (let i = 0; i < source.length && chunks.length < maxClips; i += chunkSize) {
+      const body = source.slice(i, i + chunkSize).join("\n\n")
       chunks.push({
         number: chunks.length + 1,
-        slugline: `ESCENA ${chunks.length + 1}`,
+        slugline: `CLIP ${chunks.length + 1} — BLOQUE NARRATIVO`,
         body,
       })
     }

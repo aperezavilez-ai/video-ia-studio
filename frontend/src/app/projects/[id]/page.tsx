@@ -32,6 +32,25 @@ interface Scene {
   prompt: string
   status: "pending" | "generating" | "completed"
   durationSec: number
+  slugline?: string
+  location?: string
+  summary?: string
+  action?: string
+  dialogues?: Array<{ character: string; text: string; delivery?: string; verbal_intention?: string }>
+  camera?: {
+    shot_type?: string
+    movement?: string
+    transition_in?: string
+    transition_out?: string
+    lens_mood?: string
+  }
+  visual_intention?: string
+  verbal_intention?: string
+  wardrobe_continuity?: string
+  continuity_in?: string
+  continuity_out?: string
+  mood?: string
+  production_script?: string
 }
 
 interface Character {
@@ -39,6 +58,36 @@ interface Character {
   name: string
   role: string
   prompt: string
+}
+
+function buildProductionScript(scene: Scene): string {
+  if (scene.production_script?.trim()) return scene.production_script
+  const dialogues =
+    scene.dialogues && scene.dialogues.length > 0
+      ? scene.dialogues
+          .map((d) => `${d.character}\n(${d.delivery || "natural"})\n${d.text}`)
+          .join("\n\n")
+      : "(Sin diálogo — acción visual)"
+  return [
+    scene.slugline || scene.title,
+    "",
+    scene.summary ? `RESUMEN: ${scene.summary}` : "",
+    scene.action ? `ACCIÓN: ${scene.action}` : "",
+    "",
+    "DIÁLOGOS:",
+    dialogues,
+    "",
+    scene.camera
+      ? `CÁMARA: ${scene.camera.shot_type || ""} / ${scene.camera.movement || ""} | ${scene.camera.transition_in || "cut"} → ${scene.camera.transition_out || "cut"}`
+      : "",
+    scene.visual_intention ? `INTENCIÓN VISUAL: ${scene.visual_intention}` : "",
+    scene.verbal_intention ? `INTENCIÓN VERBAL: ${scene.verbal_intention}` : "",
+    scene.wardrobe_continuity ? `VESTUARIO: ${scene.wardrobe_continuity}` : "",
+    "",
+    `PROMPT GENERACIÓN:\n${scene.prompt || ""}`,
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n")
 }
 
 export default function ProjectWorkspace() {
@@ -52,71 +101,64 @@ export default function ProjectWorkspace() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [savedSuccess, setSavedSuccess] = useState(false)
   const [isAnalyzingScript, setIsAnalyzingScript] = useState(false)
-  const [scriptText, setScriptText] = useState(
-    `INT. LABORATORIO FUTURISTA - NOCHE\n\nLas luces de neón parpadean en azul cyan sobre las consolas. LA DRA. ELENA VANCE (30s) ajusta la frecuencia del módulo cinemático.\n\nELENA\n(con voz firme)\nNEXUS, inicia la secuencia de renderizado.\n\nNEXUS-9\n(voz androide resonante)\nSecuencia activada. Todos los modelos IA están en línea.`
-  )
-
-  const [scenes, setScenes] = useState<Scene[]>([
-    {
-      id: "s1",
-      number: 1,
-      title: "Escena 1: El despertar en el laboratorio",
-      prompt: "Cinematic shot of a futurist lab, glowing cyan neon, volumetric light, 8k resolution, photorealistic",
-      status: "completed",
-      durationSec: 5
-    },
-    {
-      id: "s2",
-      number: 2,
-      title: "Escena 2: Mirada a las estrellas",
-      prompt: "Deep space nebula, cosmic flare, highly detailed sci-fi film aesthetic",
-      status: "pending",
-      durationSec: 8
-    }
-  ])
-
-  const [characters, setCharacters] = useState<Character[]>([
-    {
-      id: "c1",
-      name: "Dra. Elena Vance",
-      role: "Protagonista / Científica",
-      prompt: "Cyberpunk female scientist, futuristic suit, portrait 8k"
-    },
-    {
-      id: "c2",
-      name: "NEXUS-9",
-      role: "Androide de Asistencia",
-      prompt: "Chrome sleek android robot with blue LED eyes, close up"
-    }
-  ])
-
+  const [loadedFromScript, setLoadedFromScript] = useState(false)
+  const [scriptText, setScriptText] = useState("")
+  const [scenes, setScenes] = useState<Scene[]>([])
+  const [characters, setCharacters] = useState<Character[]>([])
   const [newSceneTitle, setNewSceneTitle] = useState("")
   const [newScenePrompt, setNewScenePrompt] = useState("")
+  const [expandedScene, setExpandedScene] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const tab = new URLSearchParams(window.location.search).get("tab")
+    if (tab === "scenes" || tab === "characters" || tab === "script" || tab === "pipeline") {
+      setActiveTab(tab)
+    }
+  }, [])
 
   useEffect(() => {
     try {
       const stored = localStorage.getItem("video_ia_projects")
+      const tabFromUrl =
+        typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("tab") : null
       if (stored) {
         const parsed = JSON.parse(stored)
         const found = parsed.find((p: any) => String(p.id) === String(projectId))
         if (found) {
           setProjectTitle(found.title)
           if (found.genre) setProjectGenre(found.genre)
-          if (typeof found.script === "string" && found.script.trim()) {
+          if (typeof found.script === "string") {
             setScriptText(found.script)
           }
           if (Array.isArray(found.scenes) && found.scenes.length > 0) {
-            setScenes(
-              found.scenes.map((s: any, idx: number) => ({
-                id: String(s.id || `s${idx + 1}`),
-                number: Number(s.number || idx + 1),
-                title: s.title || `Clip ${idx + 1}`,
-                prompt: s.prompt || "",
-                status: s.status || "pending",
-                durationSec: Number(s.durationSec || s.duration_sec || 6),
-              })),
-            )
-            setActiveTab("scenes")
+            const mapped = found.scenes.map((s: any, idx: number) => ({
+              id: String(s.id || `s${idx + 1}`),
+              number: Number(s.number || idx + 1),
+              title: s.title || `Clip ${idx + 1}`,
+              prompt: s.prompt || "",
+              status: s.status || "pending",
+              durationSec: Number(s.durationSec || s.duration_sec || 6),
+              slugline: s.slugline,
+              location: s.location,
+              summary: s.summary,
+              action: s.action,
+              dialogues: s.dialogues || [],
+              camera: s.camera,
+              visual_intention: s.visual_intention,
+              verbal_intention: s.verbal_intention,
+              wardrobe_continuity: s.wardrobe_continuity,
+              continuity_in: s.continuity_in,
+              continuity_out: s.continuity_out,
+              mood: s.mood,
+              production_script: s.production_script,
+            }))
+            setScenes(mapped)
+            setLoadedFromScript(Boolean(found.from_script) || mapped.length > 0)
+            setExpandedScene(mapped[0]?.id || null)
+            if (!tabFromUrl) setActiveTab("scenes")
+          } else {
+            setScenes([])
           }
           if (Array.isArray(found.characters) && found.characters.length > 0) {
             setCharacters(
@@ -127,19 +169,46 @@ export default function ProjectWorkspace() {
                 prompt: c.prompt || "",
               })),
             )
+          } else {
+            setCharacters([])
           }
         } else {
           setProjectTitle(`Proyecto #${projectId}`)
+          setScenes([])
+          setCharacters([])
         }
       } else {
         setProjectTitle(`Proyecto #${projectId}`)
+        setScenes([])
+        setCharacters([])
       }
     } catch {
       setProjectTitle(`Proyecto #${projectId}`)
+      setScenes([])
+      setCharacters([])
     }
   }, [projectId])
 
   const handleSave = () => {
+    try {
+      const stored = localStorage.getItem("video_ia_projects")
+      const projects = stored ? JSON.parse(stored) : []
+      const idx = Array.isArray(projects) ? projects.findIndex((p: any) => String(p.id) === String(projectId)) : -1
+      if (idx >= 0) {
+        projects[idx] = {
+          ...projects[idx],
+          title: projectTitle,
+          genre: projectGenre,
+          script: scriptText,
+          scenes,
+          characters,
+          updatedAt: new Date().toISOString(),
+        }
+        localStorage.setItem("video_ia_projects", JSON.stringify(projects))
+      }
+    } catch (e) {
+      console.warn("No se pudo guardar localmente", e)
+    }
     setSavedSuccess(true)
     setTimeout(() => setSavedSuccess(false), 2500)
   }
@@ -152,7 +221,8 @@ export default function ProjectWorkspace() {
       title: newSceneTitle,
       prompt: newScenePrompt || "Escena cinematográfica generada por IA",
       status: "pending",
-      durationSec: 6
+      durationSec: 6,
+      production_script: newScenePrompt || "Escena cinematográfica generada por IA",
     }
     setScenes([...scenes, newScene])
     setNewSceneTitle("")
@@ -162,7 +232,7 @@ export default function ProjectWorkspace() {
   const handleGenerateScene = (sceneId: string) => {
     setScenes(scenes.map(s => s.id === sceneId ? { ...s, status: "generating" } : s))
     setTimeout(() => {
-      setScenes(scenes.map(s => s.id === sceneId ? { ...s, status: "completed" } : s))
+      setScenes((prev) => prev.map(s => s.id === sceneId ? { ...s, status: "completed" } : s))
     }, 2000)
   }
 
@@ -354,20 +424,125 @@ export default function ProjectWorkspace() {
         {/* SCENES TAB */}
         {activeTab === "scenes" && (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xl font-bold text-white">Escenas de la Película</h3>
-              <span className="text-sm text-slate-400">{scenes.length} escenas en línea de tiempo</span>
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div>
+                <h3 className="text-xl font-bold text-white">Clips listos para producción</h3>
+                <p className="text-sm text-slate-400 mt-1">
+                  {loadedFromScript
+                    ? "Guiones adaptados desde tu Word: acción, diálogos, cámara y continuidad."
+                    : "Aún no hay clips. Crea un proyecto con un .docx o desglosa el guion."}
+                </p>
+              </div>
+              <span className="text-sm text-slate-400">{scenes.length} clips</span>
             </div>
 
-            {/* Add Scene Form */}
+            {scenes.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/40 p-8 text-center space-y-3">
+                <FileText className="h-8 w-8 text-slate-500 mx-auto" />
+                <p className="text-slate-300">No hay guiones de clip todavía.</p>
+                <button
+                  onClick={() => router.push("/projects/new")}
+                  className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-sm rounded-lg"
+                >
+                  Subir guion Word y fragmentar
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {scenes.map((scene) => {
+                  const open = expandedScene === scene.id
+                  const script = buildProductionScript(scene)
+                  return (
+                    <div
+                      key={scene.id}
+                      className="bg-slate-900/70 border border-slate-800 rounded-xl overflow-hidden hover:border-slate-700 transition-colors"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setExpandedScene(open ? null : scene.id)}
+                        className="w-full text-left p-5 flex items-start justify-between gap-4"
+                      >
+                        <div className="space-y-1 flex-1 min-w-0">
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <span className="px-2.5 py-0.5 bg-cyan-950 text-cyan-300 text-xs font-bold rounded">
+                              #{scene.number}
+                            </span>
+                            <h4 className="font-semibold text-white truncate">
+                              {scene.slugline || scene.title}
+                            </h4>
+                            <span className="text-xs text-slate-500 flex items-center gap-1">
+                              <Clock className="h-3 w-3" /> {scene.durationSec}s
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400 line-clamp-2">
+                            {scene.summary || scene.action || scene.prompt}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-3 shrink-0">
+                          {scene.status === "completed" ? (
+                            <span className="px-3 py-1 bg-emerald-950 text-emerald-400 border border-emerald-800 text-xs rounded-full">
+                              Generada
+                            </span>
+                          ) : scene.status === "generating" ? (
+                            <span className="px-3 py-1 bg-cyan-950 text-cyan-400 border border-cyan-800 text-xs rounded-full flex items-center gap-1">
+                              <Loader2 className="h-3 w-3 animate-spin" /> Procesando
+                            </span>
+                          ) : (
+                            <span className="px-3 py-1 bg-slate-800 text-slate-400 text-xs rounded-full">
+                              Listo
+                            </span>
+                          )}
+                        </div>
+                      </button>
+
+                      {open && (
+                        <div className="px-5 pb-5 space-y-3 border-t border-slate-800/80 pt-4">
+                          <div className="flex flex-wrap gap-2 text-[11px] text-slate-400">
+                            {scene.location && (
+                              <span className="px-2 py-1 rounded bg-slate-950 border border-slate-800">
+                                Loc: {scene.location}
+                              </span>
+                            )}
+                            {scene.camera?.shot_type && (
+                              <span className="px-2 py-1 rounded bg-slate-950 border border-slate-800">
+                                Cámara: {scene.camera.shot_type}/{scene.camera.movement}
+                              </span>
+                            )}
+                            {scene.mood && (
+                              <span className="px-2 py-1 rounded bg-slate-950 border border-slate-800">
+                                Mood: {scene.mood}
+                              </span>
+                            )}
+                          </div>
+                          <pre className="text-[11px] leading-relaxed text-slate-300 whitespace-pre-wrap font-mono bg-slate-950/80 border border-slate-800 rounded-lg p-3 max-h-96 overflow-y-auto">
+                            {script}
+                          </pre>
+                          <div className="flex justify-end">
+                            <button
+                              onClick={() => handleGenerateScene(scene.id)}
+                              disabled={scene.status === "generating"}
+                              className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                            >
+                              <Sparkles className="h-3.5 w-3.5" /> Generar video
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
             <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl space-y-4">
               <h4 className="text-sm font-semibold text-cyan-400 flex items-center gap-2">
-                <Plus className="h-4 w-4" /> Agregar Nueva Escena
+                <Plus className="h-4 w-4" /> Agregar clip manual
               </h4>
               <div className="grid md:grid-cols-2 gap-4">
                 <input
                   type="text"
-                  placeholder="Título de la escena..."
+                  placeholder="Título del clip..."
                   value={newSceneTitle}
                   onChange={(e) => setNewSceneTitle(e.target.value)}
                   className="px-4 py-2.5 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
@@ -387,55 +562,6 @@ export default function ProjectWorkspace() {
               >
                 Agregar Escena
               </button>
-            </div>
-
-            {/* Scenes List */}
-            <div className="space-y-4">
-              {scenes.map((scene) => (
-                <div
-                  key={scene.id}
-                  className="bg-slate-900/70 border border-slate-800 p-5 rounded-xl flex items-center justify-between gap-4 hover:border-slate-700 transition-colors"
-                >
-                  <div className="space-y-1 flex-1">
-                    <div className="flex items-center gap-3">
-                      <span className="px-2.5 py-0.5 bg-cyan-950 text-cyan-300 text-xs font-bold rounded">
-                        #{scene.number}
-                      </span>
-                      <h4 className="font-semibold text-white">{scene.title}</h4>
-                      <span className="text-xs text-slate-500 flex items-center gap-1">
-                        <Clock className="h-3 w-3" /> {scene.durationSec}s
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-400 font-mono bg-slate-950/60 p-2 rounded border border-slate-800/80 mt-2">
-                      Prompt: "{scene.prompt}"
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    {scene.status === "completed" ? (
-                      <span className="px-3 py-1 bg-emerald-950 text-emerald-400 border border-emerald-800 text-xs rounded-full">
-                        Generada
-                      </span>
-                    ) : scene.status === "generating" ? (
-                      <span className="px-3 py-1 bg-cyan-950 text-cyan-400 border border-cyan-800 text-xs rounded-full flex items-center gap-1">
-                        <Loader2 className="h-3 w-3 animate-spin" /> Procesando
-                      </span>
-                    ) : (
-                      <span className="px-3 py-1 bg-slate-800 text-slate-400 text-xs rounded-full">
-                        Pendiente
-                      </span>
-                    )}
-
-                    <button
-                      onClick={() => handleGenerateScene(scene.id)}
-                      disabled={scene.status === "generating"}
-                      className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
-                    >
-                      <Sparkles className="h-3.5 w-3.5" /> Generar
-                    </button>
-                  </div>
-                </div>
-              ))}
             </div>
           </div>
         )}
