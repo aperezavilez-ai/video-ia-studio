@@ -15,7 +15,7 @@ import {
   Users,
   Camera,
 } from "lucide-react"
-import type { ScriptAnalysisResult } from "@/lib/script-analysis"
+import { buildHeuristicAnalysis, type ScriptAnalysisResult } from "@/lib/script-analysis"
 import { extractDocxTextFromFile } from "@/lib/docx"
 
 type CreateResponse = {
@@ -53,7 +53,7 @@ export default function NewProject() {
   const [duration, setDuration] = useState("corto")
   const [file, setFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
-  const [phase, setPhase] = useState<"idle" | "analyzing" | "creating">("idle")
+  const [phase, setPhase] = useState<"idle" | "extracting" | "splitting" | "enriching" | "creating">("idle")
   const [error, setError] = useState("")
   const [preview, setPreview] = useState<{
     clips: number
@@ -148,32 +148,55 @@ export default function NewProject() {
       let scriptText = ""
 
       if (file) {
-        setPhase("analyzing")
+        setPhase("extracting")
         const scriptFromDocx = await extractDocxTextFromFile(file)
-        const analyzeRes = await fetch("/api/script/analyze", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            script_text: scriptFromDocx,
-            filename: file.name,
-            duration,
-          }),
+        scriptText = scriptFromDocx
+
+        setPhase("splitting")
+        // Fragmentación local inmediata (no depende del timeout de Vercel)
+        const localSplit = buildHeuristicAnalysis(scriptFromDocx, {
+          title: title.trim() || file.name.replace(/\.docx$/i, ""),
+          genre,
+          duration,
         })
-        const analyzeData = await readApiJson<{
-          detail?: string
-          analysis?: ScriptAnalysisResult
-          script_text?: string
-        }>(analyzeRes)
-        if (!analyzeRes.ok) {
-          throw new Error(analyzeData.detail || "No se pudo analizar el guion")
-        }
-        analysis = analyzeData.analysis as ScriptAnalysisResult
-        scriptText = analyzeData.script_text || scriptFromDocx
+        analysis = localSplit
         setPreview({
-          clips: analysis.clips?.length || 0,
-          characters: analysis.characters?.length || 0,
-          analysisTitle: analysis.title,
+          clips: localSplit.clips.length,
+          characters: localSplit.characters.length,
+          analysisTitle: localSplit.title,
         })
+
+        setPhase("enriching")
+        try {
+          const analyzeRes = await fetch("/api/script/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              script_text: scriptFromDocx,
+              filename: file.name,
+              duration,
+              title: title.trim(),
+              genre,
+            }),
+          })
+          const analyzeData = await readApiJson<{
+            detail?: string
+            analysis?: ScriptAnalysisResult
+            script_text?: string
+          }>(analyzeRes)
+          if (analyzeRes.ok && analyzeData.analysis?.clips?.length) {
+            analysis = analyzeData.analysis
+            scriptText = analyzeData.script_text || scriptFromDocx
+            setPreview({
+              clips: analysis.clips.length,
+              characters: analysis.characters?.length || 0,
+              analysisTitle: analysis.title,
+            })
+          }
+        } catch (analyzeErr) {
+          console.warn("Enriquecimiento IA falló; se usan clips locales", analyzeErr)
+        }
+
         if (analysis.title && title.trim().length < 3) {
           setTitle(analysis.title)
         }
@@ -219,15 +242,19 @@ export default function NewProject() {
   }
 
   const phaseLabel =
-    phase === "analyzing"
-      ? "Analizando guion y fragmentando clips..."
-      : phase === "creating"
-        ? "Creando proyecto y film bible..."
-        : saving
-          ? "Creando..."
-          : file
-            ? "Crear y fragmentar con IA"
-            : "Crear Proyecto"
+    phase === "extracting"
+      ? "Leyendo Word..."
+      : phase === "splitting"
+        ? "Dividiendo guion en clips..."
+        : phase === "enriching"
+          ? "Enriqueciendo continuidad con IA..."
+          : phase === "creating"
+            ? "Creando proyecto y film bible..."
+            : saving
+              ? "Creando..."
+              : file
+                ? "Crear y fragmentar con IA"
+                : "Crear Proyecto"
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
@@ -353,19 +380,44 @@ export default function NewProject() {
                     </div>
 
                     <div className="grid grid-cols-3 gap-2 text-xs">
-                      <div className="rounded-lg bg-slate-900 border border-slate-800 p-2 text-slate-300 flex items-center gap-2">
+                      <div
+                        className={`rounded-lg border p-2 flex items-center gap-2 ${
+                          preview
+                            ? "bg-cyan-600/10 border-cyan-600/30 text-cyan-200"
+                            : "bg-slate-900 border-slate-800 text-slate-300"
+                        }`}
+                      >
                         <Clapperboard className="h-3.5 w-3.5 text-cyan-400" />
-                        Clips
+                        {preview ? `${preview.clips} clips` : "Clips"}
                       </div>
-                      <div className="rounded-lg bg-slate-900 border border-slate-800 p-2 text-slate-300 flex items-center gap-2">
+                      <div
+                        className={`rounded-lg border p-2 flex items-center gap-2 ${
+                          preview
+                            ? "bg-cyan-600/10 border-cyan-600/30 text-cyan-200"
+                            : "bg-slate-900 border-slate-800 text-slate-300"
+                        }`}
+                      >
                         <Users className="h-3.5 w-3.5 text-cyan-400" />
-                        Personajes
+                        {preview ? `${preview.characters} pers.` : "Personajes"}
                       </div>
-                      <div className="rounded-lg bg-slate-900 border border-slate-800 p-2 text-slate-300 flex items-center gap-2">
+                      <div
+                        className={`rounded-lg border p-2 flex items-center gap-2 ${
+                          phase === "enriching" || preview
+                            ? "bg-cyan-600/10 border-cyan-600/30 text-cyan-200"
+                            : "bg-slate-900 border-slate-800 text-slate-300"
+                        }`}
+                      >
                         <Camera className="h-3.5 w-3.5 text-cyan-400" />
                         Continuidad
                       </div>
                     </div>
+
+                    {saving && phase !== "idle" && (
+                      <div className="text-sm text-cyan-300/90 flex items-center gap-2">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                        {phaseLabel}
+                      </div>
+                    )}
 
                     {preview && (
                       <div className="flex items-center gap-2 text-sm text-emerald-400">
