@@ -15,5 +15,10 @@
     "authHealth": "verified",
     "studioCard": "registered",
     "tables": 4
+  },
+  "deployment": {
+    "platform": "vercel",
+    "github": "aperezavilez-ai/video-ia-studio",
+    "productionUrl": "https://video-ia-studio-gamma.vercel.app"
   }
 }
