@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "projectName": "Video IA Studio",
+  "projectSlug": "video-ia-studio",
+  "isolationMode": "dedicated_supabase",
+  "supabase": {
+    "url": "https://supabase.gafcore.com/video-ia-studio",
+    "instanceId": "video-ia-studio",
+    "database": "postgres",
+    "schema": "video_ia_studio"
+  }
+}
