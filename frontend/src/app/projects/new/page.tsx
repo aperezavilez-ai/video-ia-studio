@@ -16,6 +16,7 @@ import {
   Camera,
 } from "lucide-react"
 import type { ScriptAnalysisResult } from "@/lib/script-analysis"
+import { extractDocxTextFromFile } from "@/lib/docx"
 
 type CreateResponse = {
   id: string | number
@@ -27,6 +28,20 @@ type CreateResponse = {
   source?: string
   analysis?: ScriptAnalysisResult | null
   script_text?: string
+}
+
+async function readApiJson<T = any>(res: Response): Promise<T> {
+  const raw = await res.text()
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    const snippet = raw.replace(/\s+/g, " ").slice(0, 180)
+    throw new Error(
+      res.status >= 500
+        ? `El servidor falló (${res.status}). ${snippet || "Respuesta no JSON"}`
+        : `Respuesta inválida del servidor (${res.status}): ${snippet}`,
+    )
+  }
 }
 
 export default function NewProject() {
@@ -134,18 +149,26 @@ export default function NewProject() {
 
       if (file) {
         setPhase("analyzing")
-        const form = new FormData()
-        form.append("file", file)
+        const scriptFromDocx = await extractDocxTextFromFile(file)
         const analyzeRes = await fetch("/api/script/analyze", {
           method: "POST",
-          body: form,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            script_text: scriptFromDocx,
+            filename: file.name,
+            duration,
+          }),
         })
-        const analyzeData = await analyzeRes.json()
+        const analyzeData = await readApiJson<{
+          detail?: string
+          analysis?: ScriptAnalysisResult
+          script_text?: string
+        }>(analyzeRes)
         if (!analyzeRes.ok) {
           throw new Error(analyzeData.detail || "No se pudo analizar el guion")
         }
         analysis = analyzeData.analysis as ScriptAnalysisResult
-        scriptText = analyzeData.script_text || ""
+        scriptText = analyzeData.script_text || scriptFromDocx
         setPreview({
           clips: analysis.clips?.length || 0,
           characters: analysis.characters?.length || 0,
@@ -172,7 +195,7 @@ export default function NewProject() {
           analysis,
         }),
       })
-      const created = (await createRes.json()) as CreateResponse & { detail?: string }
+      const created = await readApiJson<CreateResponse & { detail?: string }>(createRes)
       if (!createRes.ok) {
         throw new Error(created.detail || "No se pudo crear el proyecto")
       }
