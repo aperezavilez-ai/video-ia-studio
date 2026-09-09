@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: videoai-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-videoai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-videoai123}
+      POSTGRES_DB: ${POSTGRES_DB:-videoai_studio}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  # Redis Cache & Queue
+  redis:
+    image: redis:7-alpine
+    container_name: videoai-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: videoai-backend
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-videoai}:${POSTGRES_PASSWORD:-videoai123}@postgres:5432/${POSTGRES_DB:-videoai_studio}
+      REDIS_URL: redis://redis:6379/0
+      GAFCORE_GATEWAY_URL: ${GAFCORE_GATEWAY_URL:-http://localhost:8080/v1}
+      GAFCORE_API_KEY: ${GAFCORE_API_KEY:-gafcore-secret-key}
+      GAFCORE_DEFAULT_MODEL: ${GAFCORE_DEFAULT_MODEL:-gafcore-director}
+    volumes:
+      - ./backend:/app
+      - ./storage:/app/storage
+      - ./models:/app/models
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: videoai-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

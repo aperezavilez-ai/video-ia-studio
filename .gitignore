@@ -1,0 +1,38 @@
+# Node.js / Next.js
+node_modules/
+.next/
+out/
+build/
+dist/
+*.log
+
+# Python / FastAPI
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+ENV/
+*.env
+
+# Local Environment & Secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Storage & Temporary Generated Assets
+storage/videos/*
+storage/audio/*
+storage/renders/*
+!storage/videos/.gitkeep
+!storage/audio/.gitkeep
+!storage/renders/.gitkeep
+
+# IDEs & System
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.editcore/
